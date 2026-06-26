@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model IndexedCollection {
+  id        String   @id @default(cuid())
+  chain     String   // "solana" | "ethereum" | "polygon" | "base" | "arbitrum" | "optimism"
+  address   String   // collection address / Solana collection mint
+  name      String
+  symbol    String?
+  imageUrl  String?
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  hashes    ImageHash[]
+
+  @@unique([chain, address])
+}
+
+model ImageHash {
+  id           String   @id @default(cuid())
+  collectionId String
+  phash        String   // 64-bit hex hash from dHash
+  sampleUrl    String?
+  collection   IndexedCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@index([phash])
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  inputType String   // "address" | "image" | "url" | "wallet"
+  input     String
+  result    String   // JSON
+  createdAt DateTime @default(now())
+}
