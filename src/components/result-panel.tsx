@@ -19,15 +19,15 @@ function VerdictBar({ verdict, score }: { verdict: string; score: number }) {
   };
   const m = map[verdict] ?? map.unknown;
   return (
-    <div className="border border-[var(--color-line-strong)] mt-12">
-      <div className="flex items-stretch">
-        <div className="flex-1 p-8 border-r border-[var(--color-line-strong)]">
-          <div className="label mb-3">Verdict</div>
-          <div className="display text-5xl" style={{ color: m.color }}>{m.text}</div>
+    <div className="border border-[var(--color-line-strong)] mt-8 sm:mt-12">
+      <div className="flex flex-col sm:flex-row sm:items-stretch">
+        <div className="flex-1 p-5 sm:p-8 border-b sm:border-b-0 sm:border-r border-[var(--color-line-strong)]">
+          <div className="label mb-2 sm:mb-3">Verdict</div>
+          <div className="display text-3xl sm:text-5xl" style={{ color: m.color }}>{m.text}</div>
         </div>
-        <div className="w-48 p-8 flex flex-col items-end justify-center">
-          <div className="label mb-2">Score</div>
-          <div className="display text-5xl tabular-nums">{score}<span className="text-2xl text-[var(--color-muted)]">/100</span></div>
+        <div className="sm:w-48 p-5 sm:p-8 flex flex-row sm:flex-col items-baseline sm:items-end justify-between sm:justify-center gap-3">
+          <div className="label sm:mb-2">Score</div>
+          <div className="display text-3xl sm:text-5xl tabular-nums">{score}<span className="text-xl sm:text-2xl text-[var(--color-muted)]">/100</span></div>
         </div>
       </div>
     </div>
@@ -40,14 +40,14 @@ function AddressResult({ data }: { data: any }) {
       <VerdictBar verdict={data.risk?.verdict ?? "unknown"} score={data.risk?.score ?? 0} />
 
       <Section label="Collection">
-        <div className="flex items-start gap-6">
+        <div className="flex items-start gap-4 sm:gap-6">
           {data.image && (
             /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={data.image} alt="" className="w-24 h-24 object-cover border border-[var(--color-line)]" />
+            <img src={data.image} alt="" className="w-16 h-16 sm:w-24 sm:h-24 object-cover border border-[var(--color-line)] shrink-0" />
           )}
           <div className="flex-1 min-w-0">
-            <div className="display text-3xl mb-1">{data.name}</div>
-            <div className="mono text-[11px] tracking-wider uppercase text-[var(--color-muted)]">
+            <div className="display text-xl sm:text-3xl mb-1 break-words">{data.name}</div>
+            <div className="mono text-[10px] sm:text-[11px] tracking-wider uppercase text-[var(--color-muted)]">
               {data.chain}{data.symbol ? ` · ${data.symbol}` : ""}
             </div>
           </div>
@@ -143,29 +143,30 @@ function StatsGrid({ stats, chain }: { stats: any; chain: string }) {
 function ImageResult({ data }: { data: any }) {
   const best = data.bestMatch;
   return (
-    <div className="mt-12">
-      <div className="border border-[var(--color-line-strong)] p-8">
+    <div className="mt-8 sm:mt-12">
+      <div className="border border-[var(--color-line-strong)] p-5 sm:p-8">
         <div className="label mb-3">Match result</div>
         {best ? (
-          <div className="flex items-start gap-6">
+          <div className="flex items-start gap-4 sm:gap-6">
             {best.collection.image && (
               /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={best.collection.image} alt="" className="w-24 h-24 object-cover border border-[var(--color-line)]" />
+              <img src={best.collection.image} alt="" className="w-16 h-16 sm:w-24 sm:h-24 object-cover border border-[var(--color-line)] shrink-0" />
             )}
-            <div className="flex-1">
-              <div className="display text-3xl mb-1">{best.collection.name}</div>
-              <div className="mono text-[11px] tracking-wider uppercase text-[var(--color-muted)] mb-4">
+            <div className="flex-1 min-w-0">
+              <div className="display text-xl sm:text-3xl mb-1 break-words">{best.collection.name}</div>
+              <div className="mono text-[10px] sm:text-[11px] tracking-wider uppercase text-[var(--color-muted)] mb-4">
                 {best.collection.chain} · {best.similarity}% similar
               </div>
               <CopyValue label="ADDRESS" value={best.collection.address} />
             </div>
           </div>
         ) : (
-          <div className="display text-3xl text-[var(--color-muted)]">No match in our index.</div>
+          <div className="display text-2xl sm:text-3xl text-[var(--color-muted)]">No NFT collection found.</div>
         )}
-        <p className="text-sm text-[var(--color-muted)] mt-6 leading-relaxed">{data.note}</p>
-        <div className="mono text-[10px] tracking-widest uppercase text-[var(--color-muted)] mt-4">
-          query hash · {data.queryHash} · index size · {data.indexSize}
+        <p className="text-sm text-[var(--color-muted)] mt-5 sm:mt-6 leading-relaxed">{data.note}</p>
+        <div className="mono text-[10px] tracking-widest uppercase text-[var(--color-muted)] mt-4 break-all">
+          query hash · {data.queryHash} · index · {data.indexSize?.toLocaleString?.() ?? data.indexSize}
+          {data.chainsSearched?.length ? ` · chains · ${data.chainsSearched.join(", ")}` : ""}
         </div>
       </div>
 

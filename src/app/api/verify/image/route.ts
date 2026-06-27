@@ -5,7 +5,13 @@ import { prisma } from "@/lib/db";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const MATCH_THRESHOLD = 18; // hamming distance — lower = more similar
+// Two-tier thresholds (64-bit hash):
+//   ≤ 8  → strong match (effectively the same image)
+//   ≤ 14 → possible candidate (likely copycat / re-encoded)
+//   > 14 → no meaningful match
+const STRONG_THRESHOLD = 8;
+const CANDIDATE_THRESHOLD = 14;
+const BATCH_SIZE = 5_000;
 
 export async function POST(req: Request) {
   const ct = req.headers.get("content-type") ?? "";
@@ -30,14 +36,50 @@ export async function POST(req: Request) {
 
   const queryHash = await dHash(buf);
 
-  const all = await prisma.imageHash.findMany({
-    include: { collection: true },
-  });
+  // Stream the index in batches so we never load the whole table into memory.
+  // Keep only the top-N candidates seen so far.
+  const indexSize = await prisma.imageHash.count();
+  type Ranked = {
+    distance: number;
+    similarity: number;
+    collection: {
+      chain: string;
+      address: string;
+      name: string;
+      symbol: string | null;
+      image: string | null;
+      verified: boolean;
+    };
+  };
+  const top: Ranked[] = [];
+  const seenCollection = new Set<string>();
 
-  const ranked = all
-    .map((h) => {
+  for (let skip = 0; skip < indexSize; skip += BATCH_SIZE) {
+    const batch = await prisma.imageHash.findMany({
+      skip,
+      take: BATCH_SIZE,
+      select: {
+        phash: true,
+        collection: {
+          select: {
+            chain: true,
+            address: true,
+            name: true,
+            symbol: true,
+            imageUrl: true,
+            verified: true,
+          },
+        },
+      },
+    });
+
+    for (const h of batch) {
       const d = hamming(queryHash, h.phash);
-      return {
+      if (d > CANDIDATE_THRESHOLD) continue;
+      const key = `${h.collection.chain}:${h.collection.address}`;
+      if (seenCollection.has(key)) continue;
+      seenCollection.add(key);
+      top.push({
         distance: d,
         similarity: similarity(d),
         collection: {
@@ -48,12 +90,28 @@ export async function POST(req: Request) {
           image: h.collection.imageUrl,
           verified: h.collection.verified,
         },
-      };
-    })
-    .sort((a, b) => a.distance - b.distance);
+      });
+    }
+  }
 
-  const matches = ranked.filter((r) => r.distance <= MATCH_THRESHOLD).slice(0, 5);
+  top.sort((a, b) => a.distance - b.distance);
+  const matches = top.slice(0, 5);
   const best = matches[0] ?? null;
+
+  // Distinct chains hit — proves the search ran cross-chain.
+  const chainsSearched = await prisma.indexedCollection.findMany({
+    select: { chain: true },
+    distinct: ["chain"],
+  });
+
+  let note: string;
+  if (!best) {
+    note = `No match found. We searched ${indexSize.toLocaleString()} indexed images across ${chainsSearched.length} chain(s) and nothing came close. Either this NFT isn't from an indexed collection, or the image was modified beyond recognition.`;
+  } else if (best.distance <= STRONG_THRESHOLD) {
+    note = "Strong match — high confidence this image belongs to the matched collection.";
+  } else {
+    note = "Possible match — image is visually similar but not identical. Could be a copycat or a different edition.";
+  }
 
   await prisma.report.create({
     data: {
@@ -65,13 +123,10 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     queryHash,
-    indexSize: all.length,
+    indexSize,
+    chainsSearched: chainsSearched.map((c) => c.chain),
     bestMatch: best,
     matches,
-    note: matches.length === 0
-      ? "No match in the indexed collection set. If the collection isn't well-known, we can't ID it from the image alone."
-      : best && best.distance <= 6
-        ? "Strong match — high confidence this image belongs to the matched collection."
-        : "Possible match — image is visually similar but not identical. Could be a copycat.",
+    note,
   });
 }
