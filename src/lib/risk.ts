@@ -19,11 +19,14 @@ export function buildRisk(signals: RiskSignal[]): RiskReport {
   const passWeight = signals.filter((s) => s.pass).reduce((a, s) => a + s.weight, 0);
   const score = Math.round((passWeight / totalWeight) * 100);
 
-  // Hard fails override the score: if any "critical" signal fails, verdict drops.
-  const criticalFail = signals.some((s) => !s.pass && s.weight >= 0.4);
+  // A "critical fail" only counts when we have meaningful coverage (≥2 signals
+  // or total weight ≥ 0.6). Otherwise a single failing high-weight signal
+  // could flip an unverifiable collection to "fake" — which is dishonest.
+  const hasCoverage = signals.length >= 2 || totalWeight >= 0.6;
+  const criticalFail = hasCoverage && signals.some((s) => !s.pass && s.weight >= 0.4);
 
   let verdict: Verdict;
-  if (signals.length === 0) verdict = "unknown";
+  if (signals.length === 0 || !hasCoverage) verdict = "unknown";
   else if (criticalFail) verdict = "fake";
   else if (score >= 80) verdict = "verified";
   else if (score >= 55) verdict = "caution";
@@ -86,13 +89,15 @@ export function solanaSignals(input: {
     });
   }
 
-  out.push({
-    key: "metadata",
-    label: "On-chain metadata",
-    weight: 0.1,
-    pass: input.hasName,
-    detail: input.hasName ? "Name present" : "No on-chain name",
-  });
+  if (input.hasName) {
+    out.push({
+      key: "metadata",
+      label: "On-chain metadata",
+      weight: 0.1,
+      pass: true,
+      detail: "Name present",
+    });
+  }
 
   return out;
 }

@@ -4,6 +4,7 @@ import {
   getSolanaAsset,
   collectionFromAsset,
   getMagicEdenCollectionBySymbol,
+  resolveMagicEdenCollection,
   getMagicEdenStats,
   getMagicEdenActivities,
   getMagicEdenHolderStats,
@@ -62,10 +63,11 @@ async function verifySolana(address: string, symbolHint?: string, inputIsSymbol 
   let metaplexVerifiedCreator: boolean | undefined; // undefined = unknown, don't penalize
   let hasName = false;
 
-  // Pre-fetch ME if we have a symbol hint (symbol-shaped input or explicit hint).
+  // Pre-fetch ME if we have a symbol hint, trying common slug variants
+  // (mad_lads ↔ madlads, foo-bar ↔ foo_bar, lowercase, etc.).
   let me: Awaited<ReturnType<typeof getMagicEdenCollectionBySymbol>> = null;
   if (symbolHint) {
-    me = await getMagicEdenCollectionBySymbol(symbolHint).catch(() => null);
+    me = await resolveMagicEdenCollection(symbolHint).catch(() => null);
   }
 
   if (!inputIsSymbol) {
@@ -104,11 +106,11 @@ async function verifySolana(address: string, symbolHint?: string, inputIsSymbol 
 
   // Fallback ME lookups if we still don't have one
   if (!me && collectionSymbol) {
-    me = await getMagicEdenCollectionBySymbol(collectionSymbol).catch(() => null);
+    me = await resolveMagicEdenCollection(collectionSymbol).catch(() => null);
   }
   if (!me && collectionName) {
     const guess = collectionName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-    me = await getMagicEdenCollectionBySymbol(guess).catch(() => null);
+    me = await resolveMagicEdenCollection(guess).catch(() => null);
   }
 
   const symbol = me?.symbol;

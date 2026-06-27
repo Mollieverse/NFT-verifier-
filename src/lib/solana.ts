@@ -1,3 +1,28 @@
+const ME_HEADERS: HeadersInit = {
+  "user-agent": "Mozilla/5.0 (compatible; findr-nft-verifier/0.1)",
+  "accept": "application/json",
+};
+
+/** Common slug variations to try if exact match fails (mad_lads ↔ madlads etc.). */
+function slugVariants(s: string): string[] {
+  const out = new Set<string>();
+  out.add(s);
+  out.add(s.toLowerCase());
+  out.add(s.replace(/[_-]/g, ""));
+  out.add(s.replace(/[_-]/g, "").toLowerCase());
+  out.add(s.replace(/-/g, "_"));
+  out.add(s.replace(/_/g, "-"));
+  return Array.from(out).filter(Boolean);
+}
+
+export async function resolveMagicEdenCollection(input: string): Promise<MagicEdenCollection | null> {
+  for (const v of slugVariants(input)) {
+    const me = await getMagicEdenCollectionBySymbol(v).catch(() => null);
+    if (me) return me;
+  }
+  return null;
+}
+
 function heliusUrl(): string {
   const key = process.env.HELIUS_API_KEY;
   if (!key) throw new Error("HELIUS_API_KEY not set");
@@ -51,13 +76,13 @@ export interface MagicEdenCollection {
 }
 
 export async function getMagicEdenCollectionBySymbol(symbol: string): Promise<MagicEdenCollection | null> {
-  const r = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}`);
+  const r = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}`, { headers: ME_HEADERS, signal: AbortSignal.timeout(10_000) });
   if (!r.ok) return null;
   return (await r.json()) as MagicEdenCollection;
 }
 
 export async function getMagicEdenStats(symbol: string): Promise<{ floorPrice?: number; listedCount?: number; volumeAll?: number; avgPrice24hr?: number } | null> {
-  const r = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/stats`);
+  const r = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/stats`, { headers: ME_HEADERS, signal: AbortSignal.timeout(10_000) });
   if (!r.ok) return null;
   return await r.json();
 }
@@ -73,14 +98,15 @@ export async function getMagicEdenActivities(symbol: string, limit = 10): Promis
   tokenMint?: string;
 }>> {
   const r = await fetch(
-    `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/activities?offset=0&limit=${limit}`
+    `https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/activities?offset=0&limit=${limit}`,
+    { headers: ME_HEADERS, signal: AbortSignal.timeout(10_000) }
   );
   if (!r.ok) return [];
   return await r.json();
 }
 
 export async function getMagicEdenHolderStats(symbol: string): Promise<{ totalSupply?: number; uniqueHolders?: number } | null> {
-  const r = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/holder_stats`);
+  const r = await fetch(`https://api-mainnet.magiceden.dev/v2/collections/${encodeURIComponent(symbol)}/holder_stats`, { headers: ME_HEADERS, signal: AbortSignal.timeout(10_000) });
   if (!r.ok) return null;
   return await r.json();
 }
