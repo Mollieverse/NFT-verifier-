@@ -5,7 +5,7 @@
   "installCommand": "npm install",
   "functions": {
     "src/app/api/verify/image/route.ts": {
-      "maxDuration": 30,
+      "maxDuration": 60,
       "memory": 1024
     },
     "src/app/api/verify/address/route.ts": {

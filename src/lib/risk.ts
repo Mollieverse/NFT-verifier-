@@ -34,7 +34,7 @@ export function buildRisk(signals: RiskSignal[]): RiskReport {
 
 /** Solana risk: combines Metaplex verified creators, Magic Eden badging, holder breadth. */
 export function solanaSignals(input: {
-  metaplexVerifiedCreator: boolean;
+  metaplexVerifiedCreator?: boolean; // undefined = unknown (skip, do not penalize)
   magicEdenBadged?: boolean;
   magicEdenFlagged?: boolean;
   uniqueHolders?: number;
@@ -43,15 +43,17 @@ export function solanaSignals(input: {
 }): RiskSignal[] {
   const out: RiskSignal[] = [];
 
-  out.push({
-    key: "metaplex-creator",
-    label: "Metaplex verified creator",
-    weight: 0.5,
-    pass: input.metaplexVerifiedCreator,
-    detail: input.metaplexVerifiedCreator
-      ? "On-chain creator signature present"
-      : "No verified on-chain creator — common in scam mints",
-  });
+  if (input.metaplexVerifiedCreator !== undefined) {
+    out.push({
+      key: "metaplex-creator",
+      label: "Metaplex verified creator",
+      weight: 0.5,
+      pass: input.metaplexVerifiedCreator,
+      detail: input.metaplexVerifiedCreator
+        ? "On-chain creator signature present"
+        : "No verified on-chain creator — common in scam mints",
+    });
+  }
 
   if (input.magicEdenBadged !== undefined) {
     out.push({

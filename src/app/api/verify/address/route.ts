@@ -12,8 +12,15 @@ import { getEvmCollection, getEvmCollectionSales } from "@/lib/evm";
 import { buildRisk, solanaSignals, evmSignals } from "@/lib/risk";
 import { prisma } from "@/lib/db";
 
+const SOLANA_MINT_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
 export async function POST(req: Request) {
-  const body = (await req.json()) as { address?: string; chain?: Chain; symbol?: string };
+  const body = (await req.json()) as {
+    address?: string;
+    chain?: Chain;
+    symbol?: string;
+    isSymbol?: boolean;
+  };
   if (!body.address) return NextResponse.json({ error: "address required" }, { status: 400 });
 
   const chain = body.chain ?? detectChainFromAddress(body.address);
@@ -21,11 +28,14 @@ export async function POST(req: Request) {
 
   let result: any = null;
   try {
-    result = chain === "solana"
-      ? await verifySolana(body.address, body.symbol)
-      : isEvmChain(chain)
-        ? await verifyEvm(chain, body.address)
-        : null;
+    if (chain === "solana") {
+      // If marked as symbol, OR the input doesn't look like a base58 mint,
+      // treat it as a Magic Eden slug and resolve via the marketplace first.
+      const treatAsSymbol = body.isSymbol === true || !SOLANA_MINT_RE.test(body.address);
+      result = await verifySolana(body.address, body.symbol ?? (treatAsSymbol ? body.address : undefined), treatAsSymbol);
+    } else if (isEvmChain(chain)) {
+      result = await verifyEvm(chain, body.address);
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : "external lookup failed";
     return NextResponse.json({ error: msg, chain }, { status: 502 });
@@ -40,54 +50,81 @@ export async function POST(req: Request) {
   return NextResponse.json(result);
 }
 
-async function verifySolana(address: string, symbolHint?: string) {
-  // Two cases: address is a collection mint, OR it's an individual NFT mint.
-  // Try DAS getAsset first — if it's an NFT, follow grouping to its collection.
-  const asset = await getSolanaAsset(address);
+async function verifySolana(address: string, symbolHint?: string, inputIsSymbol = false) {
+  // Resolution strategy:
+  //   - If input is a symbol slug: hit Magic Eden first, then pull a sample
+  //     tokenMint from activities to fetch on-chain creator data.
+  //   - If input is a mint: getAsset → if NFT, follow grouping to collection.
+  let asset: Awaited<ReturnType<typeof getSolanaAsset>> = null;
   let collectionMint = address;
   let assetName: string | undefined;
   let assetImage: string | undefined;
-  let metaplexVerifiedCreator = false;
+  let metaplexVerifiedCreator: boolean | undefined; // undefined = unknown, don't penalize
   let hasName = false;
 
-  if (asset) {
-    const groupedCollection = collectionFromAsset(asset);
-    if (groupedCollection && groupedCollection !== address) collectionMint = groupedCollection;
-    assetName = asset.content?.metadata?.name;
-    assetImage = asset.content?.links?.image ?? asset.content?.files?.[0]?.uri;
-    hasName = !!assetName;
-    metaplexVerifiedCreator = !!asset.creators?.some((c) => c.verified);
+  // Pre-fetch ME if we have a symbol hint (symbol-shaped input or explicit hint).
+  let me: Awaited<ReturnType<typeof getMagicEdenCollectionBySymbol>> = null;
+  if (symbolHint) {
+    me = await getMagicEdenCollectionBySymbol(symbolHint).catch(() => null);
   }
 
-  // If we now have a different collection mint, fetch it too.
-  const collectionAsset = collectionMint === address ? asset : await getSolanaAsset(collectionMint);
+  if (!inputIsSymbol) {
+    asset = await getSolanaAsset(address).catch(() => null);
+    if (asset) {
+      const groupedCollection = collectionFromAsset(asset);
+      if (groupedCollection && groupedCollection !== address) collectionMint = groupedCollection;
+      assetName = asset.content?.metadata?.name;
+      assetImage = asset.content?.links?.image ?? asset.content?.files?.[0]?.uri;
+      hasName = !!assetName;
+      metaplexVerifiedCreator = !!asset.creators?.some((c) => c.verified);
+    }
+  }
+
+  // If we still don't have an asset but ME resolved, grab a sample tokenMint
+  // from activities to get creator info from the chain.
+  if (!asset && me?.symbol) {
+    const samples = await getMagicEdenActivities(me.symbol, 5).catch(() => []);
+    const mint = samples.find((a) => a.tokenMint)?.tokenMint;
+    if (mint) {
+      asset = await getSolanaAsset(mint).catch(() => null);
+      if (asset) {
+        const grouped = collectionFromAsset(asset);
+        if (grouped) collectionMint = grouped;
+        metaplexVerifiedCreator = !!asset.creators?.some((c) => c.verified);
+        assetImage = assetImage ?? asset.content?.links?.image ?? asset.content?.files?.[0]?.uri;
+      }
+    }
+  }
+
+  const collectionAsset = collectionMint === address ? asset : await getSolanaAsset(collectionMint).catch(() => null);
   const collectionName = collectionAsset?.content?.metadata?.name;
   const collectionSymbol = symbolHint
     ?? collectionAsset?.content?.metadata?.symbol
     ?? asset?.content?.metadata?.symbol;
 
-  // Magic Eden lookup is symbol-based, so try to resolve.
-  let me = collectionSymbol ? await getMagicEdenCollectionBySymbol(collectionSymbol) : null;
-  // Common heuristic: try kebab-cased name
+  // Fallback ME lookups if we still don't have one
+  if (!me && collectionSymbol) {
+    me = await getMagicEdenCollectionBySymbol(collectionSymbol).catch(() => null);
+  }
   if (!me && collectionName) {
     const guess = collectionName.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-    me = await getMagicEdenCollectionBySymbol(guess);
+    me = await getMagicEdenCollectionBySymbol(guess).catch(() => null);
   }
 
   const symbol = me?.symbol;
   const [stats, holderStats, activities] = await Promise.all([
-    symbol ? getMagicEdenStats(symbol) : Promise.resolve(null),
-    symbol ? getMagicEdenHolderStats(symbol) : Promise.resolve(null),
-    symbol ? getMagicEdenActivities(symbol, 10) : Promise.resolve([]),
+    symbol ? getMagicEdenStats(symbol).catch(() => null) : Promise.resolve(null),
+    symbol ? getMagicEdenHolderStats(symbol).catch(() => null) : Promise.resolve(null),
+    symbol ? getMagicEdenActivities(symbol, 10).catch(() => []) : Promise.resolve([]),
   ]);
 
   const signals = solanaSignals({
-    metaplexVerifiedCreator,
+    metaplexVerifiedCreator, // may be undefined → signal skipped
     magicEdenBadged: me?.isBadged,
     magicEdenFlagged: me?.isFlagged,
     uniqueHolders: holderStats?.uniqueHolders,
     totalSupply: holderStats?.totalSupply,
-    hasName: hasName || !!collectionName,
+    hasName: hasName || !!collectionName || !!me?.name,
   });
 
   return {
